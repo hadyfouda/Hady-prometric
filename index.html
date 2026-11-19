@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b2147">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>Hady Prometric</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b2147;font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:#fff}
+  .box{width:min(360px,88vw);text-align:center}
+  img{width:96px;height:96px;border-radius:22px}
+  h1{font-size:22px;margin:14px 0 4px}
+  p{color:#9fb3d1;font-size:14px;margin:0 0 18px;line-height:1.7}
+  input{width:100%;box-sizing:border-box;padding:13px 14px;border-radius:12px;border:0;font-size:16px;direction:ltr;text-align:center}
+  button{width:100%;margin-top:10px;padding:13px;border-radius:12px;border:0;background:#22d3ee;color:#0b2147;font-weight:800;font-size:16px}
+  .err{color:#fda4af;font-size:14px;min-height:22px;margin-top:10px}
+  .hide{display:none}
+</style>
+</head>
+<body>
+<div class="box">
+  <img src="./icon-192.png" alt="">
+  <h1>Hady Prometric</h1>
+  <div id="wait"><p>بيفتح…</p></div>
+  <form id="f" class="hide">
+    <p>اكتب الباسورد مرة واحدة على الجهاز ده.</p>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="الباسورد">
+    <button id="go" type="submit">ادخل</button>
+    <div class="err" id="err"></div>
+  </form>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const db = () => new Promise((ok, no) => { const r = indexedDB.open('hady-pwa', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const idb = async (mode, fn) => { const d = await db(); return new Promise((ok, no) => { const t = d.transaction('kv', mode); const q = fn(t.objectStore('kv')); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); }); };
+const getKey = () => idb('readonly', (s) => s.get('key'));
+const putKey = (k) => idb('readwrite', (s) => s.put(k, 'key'));
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+let meta;
+const verify = async (key) => { try { const c = b64(meta.check); await crypto.subtle.decrypt({ name: 'AES-GCM', iv: c.slice(0, 12) }, key, c.slice(12)); return true; } catch { return false; } };
+const enter = () => location.replace('./app.html');
+(async () => {
+  if (!('serviceWorker' in navigator) || !window.crypto?.subtle) { $('wait').innerHTML = '<p>المتصفح ده مش بيدعم البرنامج — افتحه من جوجل كروم.</p>'; return; }
+  await navigator.serviceWorker.register('./sw.js');
+  await navigator.serviceWorker.ready;
+  if (!navigator.serviceWorker.controller) await new Promise((r) => { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); setTimeout(r, 3000); });
+  meta = await (await fetch('./salt.json', { cache: 'no-cache' }).catch(() => caches.match('./salt.json'))).json();
+  const k = await getKey().catch(() => null);
+  if (k && await verify(k)) return enter();
+  $('wait').classList.add('hide'); $('f').classList.remove('hide'); $('pw').focus();
+  $('f').onsubmit = async (e) => {
+    e.preventDefault(); $('err').textContent = ''; $('go').disabled = true; $('go').textContent = '…';
+    try {
+      const base = await crypto.subtle.importKey('raw', new TextEncoder().encode($('pw').value), 'PBKDF2', false, ['deriveKey']);
+      const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(meta.salt), iterations: meta.iter, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      if (!(await verify(key))) throw 0;
+      await putKey(key); enter();
+    } catch { $('err').textContent = 'الباسورد غلط'; $('go').disabled = false; $('go').textContent = 'ادخل'; }
+  };
+})();
+</script>
+</body>
+</html>
